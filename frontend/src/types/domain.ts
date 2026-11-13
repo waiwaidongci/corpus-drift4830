@@ -1,6 +1,10 @@
 export interface User{id:number;email:string;name:string;role:string}
-export interface Snapshot{id:number;name:string;kind:string;filename:string;description:string;count:number}
+export interface Snapshot{id:number;name:string;kind:string;filename:string;description:string;count:number;import_batch_id?:number|null}
 export interface Utterance{id:number;reference:string;features:Record<string,number|string|null>}
+export interface BatchCounts{total:number;valid:number;quarantined:number}
+export interface BatchRevision{id:number;row_id:number;previous_raw:string;previous_error:string|null;previous_status:string;new_raw:string;new_error:string|null;new_status:string;actor:string;created_at:string}
+export interface BatchRow{id:number;batch_id:number;line_no:number;raw_text:string;reference:string|null;features:Record<string,number|string|null>|null;error:string|null;status:string;corrected_at:string|null;created_at:string;revisions:BatchRevision[]}
+export interface ImportBatch{id:number;name:string;kind:string;filename:string;description:string;status:string;created_by:number;created_at:string;publisher_id:number|null;published_snapshot_id:number|null;published_at:string|null;counts:BatchCounts;row_count:number;valid_count:number;quarantined_count:number;snapshot:Snapshot|null;rows?:BatchRow[]}
 export interface Binning{kind:string;labels:string[];internal_edges?:number[];categories?:string[];fitted_from:string}
 export interface Metrics{psi:number;js:number;reference_proportions:number[];candidate_proportions:number[];reference_counts:number[];candidate_counts:number[];reference_n:number;candidate_n:number;reference_missing:number;candidate_missing:number;binning:Binning;p_value:number|null;q_value:number|null;ks_statistic:number|null;fdr_reject:boolean;ks_reference_n?:number;ks_candidate_n?:number}
 export interface Finding{id:number;run_id:number;feature:string;status:string;metrics:Metrics}

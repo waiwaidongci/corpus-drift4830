@@ -13,7 +13,7 @@ docker compose up -d --build --wait
 docker compose exec -T backend python -m scripts.seed_demo
 ```
 
-访问 [校对室](http://localhost:18215)，[后端文档](http://localhost:19215/docs)，MySQL映射17715。首次API启动自动seed；失败记录日志而不阻塞API，可单独运行脚本。初始2个快照各900片段，共1800；5个特征、1份Python真算比较、5个持久化发现、1份补采草案。固定种子113，参考与候选分别为 `yy-corpus-202611-reference.csv` 和 `yy-corpus-202611-candidate.csv`。
+访问 [校对室](http://localhost:18215)，[后端文档](http://localhost:19215/docs)，MySQL映射17715。首次API启动自动seed；失败记录日志而不阻塞API，可单独运行脚本。初始2个快照各900片段，共1800；另有1个12行的待校验批次（第5行类型错误、第12行编号重复，各隔离1条）；5个特征、1份Python真算比较、5个持久化发现、1份补采草案。固定种子113，参考与候选分别为 `yy-corpus-202611-reference.csv` 和 `yy-corpus-202611-candidate.csv`。
 
 | 账号 | 密码 | 权限 |
 |---|---|---|
@@ -24,18 +24,29 @@ docker compose exec -T backend python -m scripts.seed_demo
 ## 一天的校对剧本
 
 1. 09:00 梁栩以analyst登录，检查参考/候选各900条元特征。
-2. 在语料快照中读前100条样本，看到duration/noise/token_rate和language/device；null明确显示为缺失。
-3. 建立“十一月采集分布复校”，选择五特征，参考分位箱6、每桶平滑伪计数0.5、FDR α=.05。
-4. 先做全量比较，再可按语言zh/设备mobile过滤两边；任一切片不足5条会明确failed，不静默当无漂移。
-5. worker只用参考非缺失值拟合分位边界与参考类别字典，再将候选投影到冻结箱。
-6. 看PSI/JS效应量、连续KS原p/BH q及FDR拒绝；打开language看到__NEW__和__MISSING__独立计数。
-7. 从当前发现建立“来源结构补采说明”，填写切片、目标200片段和采集理由。
-8. 叶砚以admin审稿，说明先核对来源再补采，后续质量变化须独立评测。
-9. 唐禾以viewer导出获批CSV，保留发现指标、校正q与审稿说明；不将漂移直接表述为质量劣化。
+2. 导入新采集片段时先建立“待校验批次”：一行一个JSON对象，逐行保存原文、编号、解析/取值错误和处置状态（合格或隔离）。坏行只隔离自己，不再整批退回；坏行与好行的数量可对账（合格+隔离=总行数）。
+3. 修正隔离行时提交该行新原文，服务只重新解析这一行并检查同编号冲突；其他行原文不会重新解析。若该行改号，仅旧编号组的派生冲突标记会重算（可解除因它产生的隔离）；不会把未编辑的合格行新改判为隔离。每次修正保留前次原文、错误与状态。同编号会明确拦截：内容不一致记为“编号冲突”，内容完全相同也记为“编号重复”，两者都隔离且都不能发布。
+4. 在语料快照中读前100条样本，看到duration/noise/token_rate和language/device；null明确显示为缺失。
+5. 建立“十一月采集分布复校”，选择五特征，参考分位箱6、每桶平滑伪计数0.5、FDR α=.05。
+6. 先做全量比较，再可按语言zh/设备mobile过滤两边；任一切片不足5条会明确failed，不静默当无漂移。
+7. worker只用参考非缺失值拟合分位边界与参考类别字典，再将候选投影到冻结箱。
+8. 看PSI/JS效应量、连续KS原p/BH q及FDR拒绝；打开language看到__NEW__和__MISSING__独立计数。
+9. 从当前发现建立“来源结构补采说明”，填写切片、目标200片段和采集理由。
+10. 叶砚以admin审稿，说明先核对来源再补采，后续质量变化须独立评测。
+11. 唐禾以viewer导出获批CSV，保留发现指标、校正q与审稿说明；不将漂移直接表述为质量劣化。
+12. 批次隔离清零后由研究员发布：一次事务生成完整快照，重试或并发发布只保留一份；发布后行原文和快照内容冻结。待校验批次在发布前不进入比较，发布结果在快照页可查。
+
+## 待校验批次与发布口径
+
+导入有两种入口：`POST /import-batches` 建立待校验批次（`content` 按行或 `lines` 数组），`POST /snapshots` 保留原有JSON数组整批导入。批次表保存 `total/valid/quarantined` 三个计数，服务保证 `total=valid+quarantined`；存在隔离行时 `POST /import-batches/{id}/publish` 返回409并说明数量，不生成任何快照。
+
+逐行校验复用原有五特征规则：reference必填且1–80字符；features必须恰好五项；数值须有限或null（布尔不算数字）；类别须1–40字符非空字符串且不得为`__NEW__`/`__MISSING__`；额外字段、缺字段、非法JSON均为隔离原因。原文按行原样保存（最多20000字符/行，整批原文最多5,000,000字符；MySQL使用MEDIUMTEXT），空行也单独成行并隔离。编号冲突按解析成功的行分组判定：同编号行号最小者保留，其余隔离；修正导致编号变化时会重算旧编号组的派生冲突标记，但不会重新解析其他行原文。修正后的行若与同编号既有行冲突，隔离的是被修正行，既有的合格行不被静默改判。
+
+发布使用数据库行锁串行化：`import_batches`行加`FOR UPDATE`，`corpus_snapshots.import_batch_id`唯一约束作为最终保险。重复发布直接返回首次结果（`created:false`与同一`snapshot_id`）；并发发布的一方提交后另一方回退并返回该结果，不会出现两份快照或半份快照。发布要求隔离数为0、合格行非空、编号唯一；快照名沿用批次名，与既有快照或批次重名会被409拦截。发布后`PATCH /import-batches/{id}/rows/{row_id}`返回409，内容和修正记录均只读可见。修正历史在`import_row_revisions`中保存前次/本次原文、错误、状态和操作者。
 
 ## 数据、分箱与统计口径
 
-五个核心实体CorpusSnapshot、Utterance、ComparisonRun、DriftFinding、ResamplingPlan，均贯穿表/model/schema/service/route/API/store/UI。六页为校对首页、语料快照、比较配置、漂移发现、补采审稿、校对留痕；HistogramBins、FindingSummary、RunTable跨页复用，同时共享Table/Badge/Notice/Empty。
+五个核心实体CorpusSnapshot、Utterance、ComparisonRun、DriftFinding、ResamplingPlan，均贯穿表/model/schema/service/route/API/store/UI。待校验批次另设ImportBatch、ImportBatchRow、ImportRowRevision。六页为校对首页、语料快照、比较配置、漂移发现、补采审稿、校对留痕；语料快照页同时展示待校验批次、逐行校验/修正/发布与已发布快照。HistogramBins、FindingSummary、RunTable跨页复用，同时共享Table/Badge/Notice/Empty。
 
 数值特征：duration（秒）、noise（dB）、token_rate（token/s）；类别：language、device。API导入20–5000条JSON数组，每项reference唯一、五特征完整，值可null；数值必须有限，类别必须非空字符串，保留名__NEW__/__MISSING__禁止作为真实类别。没有CSV解析器或真实采集接口。
 
@@ -80,7 +91,7 @@ npm run dev
 
 结构：backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}；backend/scripts/seed_demo.py；backend/migrations/；frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。metadata首次建表，migrations说明结构，生产增量升级需另行规划。快照名/片段自然键/基准运行名让seed可重复且不覆盖用户修改；基准仅缺失时计算。请求ID和全局错误两个中间件；AuditLog记录登录、导入、任务和审稿；CSV公式前缀转义。
 
-共享枚举位置：后端backend/src/constants/enums.py的Role/RunStatus/PlanStatus/FindingStatus；前端frontend/src/constants/enums.ts对应角色/运行/计划/发现标签；使用于鉴权、运行/计划服务、schema和Badge/Layout/各页面。测试脚本、真实截图、CSV、日志、报告仅位于批次根test-artifacts/gb-0011，源码不含截图/测试报告。真机测试、oracle和已知差异见该目录TESTING.md。
+共享枚举位置：后端backend/src/constants/enums.py的Role/RunStatus/PlanStatus/FindingStatus/BatchStatus/BatchRowStatus；前端frontend/src/constants/enums.ts对应角色/运行/计划/发现/批次/行标签；使用于鉴权、运行/计划/批次服务、schema和Badge/Layout/各页面。测试脚本、真实截图、CSV、日志、报告仅位于批次根test-artifacts/gb-0011，源码不含截图/测试报告。真机测试、oracle和已知差异见该目录TESTING.md。
 
 ## 范围与License
 

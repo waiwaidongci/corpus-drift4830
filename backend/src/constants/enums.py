@@ -15,3 +15,9 @@ class PlanStatus(StrEnum):
 class FindingStatus(StrEnum):
  REVIEW='review'
  QUIET='quiet'
+class BatchStatus(StrEnum):
+ PENDING='pending'
+ PUBLISHED='published'
+class BatchRowStatus(StrEnum):
+ VALID='valid'
+ QUARANTINED='quarantined'
